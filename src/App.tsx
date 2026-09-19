@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   FileText,
   UploadCloud,
@@ -8,14 +8,24 @@ import {
   Sparkles,
   Zap,
   HelpCircle,
-  AlertCircle
+  AlertCircle,
+  Sun,
+  ChevronDown,
+  Layers,
+  ArrowRight,
+  RotateCcw,
+  CheckCircle2,
+  FileSpreadsheet,
+  Clock,
+  ShieldCheck,
+  Briefcase
 } from 'lucide-react';
+import confetti from 'canvas-confetti';
 import { Sidebar } from './components/Sidebar';
 import { ResultsTable } from './components/ResultsTable';
 import { CandidateDetailModal } from './components/CandidateDetailModal';
 import { ScreeningParams, ScoreResult } from './types';
-import { SAMPLE_JD, SAMPLE_CVS } from './data/sampleData';
-import { scoreCandidateTfidf } from './utils/scoring';
+import { SAMPLE_JD, SAMPLE_CVS, JOB_PRESETS } from './data/sampleData';
 
 export const App: React.FC = () => {
   // Screening Parameters
@@ -30,8 +40,9 @@ export const App: React.FC = () => {
   const [ollamaAvailable, setOllamaAvailable] = useState(false);
 
   // Inputs
-  const [jdText, setJdText] = useState('');
+  const [jdText, setJdText] = useState(SAMPLE_JD);
   const [jdFile, setJdFile] = useState<File | null>(null);
+  const [selectedPresetId, setSelectedPresetId] = useState<string>('solar_bess_engineer');
 
   // CV items: either real File objects or sample text objects
   const [cvFiles, setCvFiles] = useState<
@@ -41,13 +52,16 @@ export const App: React.FC = () => {
   // Results & UI state
   const [isScreening, setIsScreening] = useState(false);
   const [isDraggingCv, setIsDraggingCv] = useState(false);
-  const [progressMsg, setProgressMsg] = useState('');
+  const [isDraggingJd, setIsDraggingJd] = useState(false);
+  const [screeningStep, setScreeningStep] = useState<string>('');
+  const [screeningProgress, setScreeningProgress] = useState<number>(0);
   const [results, setResults] = useState<ScoreResult[]>([]);
   const [selectedCandidate, setSelectedCandidate] = useState<ScoreResult | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
-  // Check health and Ollama status on mount
+  // Health check on mount
   useEffect(() => {
     fetch('/api/health')
       .then((res) => {
@@ -65,7 +79,7 @@ export const App: React.FC = () => {
       .catch((err) => console.log('Health check note:', err));
   }, []);
 
-  // Pre-load sample data on first visit
+  // Pre-load sample data on initial mount
   useEffect(() => {
     loadSampleData();
   }, []);
@@ -73,6 +87,7 @@ export const App: React.FC = () => {
   const loadSampleData = () => {
     setJdText(SAMPLE_JD);
     setJdFile(null);
+    setSelectedPresetId('solar_bess_engineer');
     const sampleItems = SAMPLE_CVS.map((cv, idx) => ({
       id: `sample_${idx}`,
       name: cv.name,
@@ -81,6 +96,16 @@ export const App: React.FC = () => {
     }));
     setCvFiles(sampleItems);
     setErrorMessage(null);
+    setSuccessNotice('Sunjet Energy sample job description and 4 candidate resumes loaded.');
+    setTimeout(() => setSuccessNotice(null), 3500);
+  };
+
+  const handleSelectPreset = (presetId: string) => {
+    const preset = JOB_PRESETS.find((p) => p.id === presetId);
+    if (!preset) return;
+    setSelectedPresetId(preset.id);
+    setJdText(preset.text);
+    setJdFile(null);
   };
 
   const handleJdFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -88,7 +113,6 @@ export const App: React.FC = () => {
     if (!file) return;
     setJdFile(file);
 
-    // If it's a plain text file, read into textarea directly
     if (file.name.endsWith('.txt') || file.name.endsWith('.md')) {
       const reader = new FileReader();
       reader.onload = (ev) => {
@@ -113,7 +137,6 @@ export const App: React.FC = () => {
         sizeStr: `${(f.size / 1024).toFixed(1)} KB`
       };
 
-      // Read text files in the browser for instant availability
       if (f.name.endsWith('.txt') || f.name.endsWith('.md')) {
         const reader = new FileReader();
         reader.onload = (ev) => {
@@ -126,13 +149,15 @@ export const App: React.FC = () => {
     });
 
     setCvFiles((prev) => [...prev, ...newItems]);
+    setSuccessNotice(`Added ${newItems.length} candidate CV file(s) to the queue.`);
+    setTimeout(() => setSuccessNotice(null), 3000);
   };
 
   const handleCvFilesUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       addCvFiles(e.target.files);
     }
-    e.target.value = ''; // Reset input
+    e.target.value = '';
   };
 
   const removeCv = (id: string) => {
@@ -143,20 +168,31 @@ export const App: React.FC = () => {
     setCvFiles([]);
   };
 
+  const clearWorkspace = () => {
+    setJdText('');
+    setJdFile(null);
+    setCvFiles([]);
+    setResults([]);
+    setErrorMessage(null);
+    setSuccessNotice('Workspace cleared.');
+    setTimeout(() => setSuccessNotice(null), 2500);
+  };
+
   // Run Screening Engine
   const handleRunScreening = async () => {
     setErrorMessage(null);
     if (!jdText.trim() && !jdFile) {
-      setErrorMessage('Please provide a Job Description (paste text or upload a file).');
+      setErrorMessage('Please provide a Job Description (paste text, select a preset, or upload a file).');
       return;
     }
     if (cvFiles.length === 0) {
-      setErrorMessage('Please upload at least one candidate CV or load sample candidates.');
+      setErrorMessage('Please upload at least one candidate CV or click "Reset Sample Data".');
       return;
     }
 
     setIsScreening(true);
-    setProgressMsg(`Evaluating ${cvFiles.length} candidate CV(s) with Gemini AI...`);
+    setScreeningStep('1/3 Ingesting & parsing candidate documents...');
+    setScreeningProgress(25);
 
     try {
       const formData = new FormData();
@@ -182,14 +218,16 @@ export const App: React.FC = () => {
         formData.append('cv_list', JSON.stringify(inlineCvList));
       }
 
-      // Robust fetch loop with multi-attempt failover and warmup handling
+      setScreeningStep('2/3 Semantic skill extraction with Gemini AI...');
+      setScreeningProgress(60);
+
       let lastErrMessage = '';
       const MAX_RETRIES = 3;
 
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
           if (attempt > 1) {
-            setProgressMsg(`Connecting to screening engine (attempt ${attempt} of ${MAX_RETRIES})...`);
+            setScreeningStep(`Connecting to AI model (attempt ${attempt} of ${MAX_RETRIES})...`);
             await new Promise((r) => setTimeout(r, attempt * 1500));
           }
 
@@ -200,23 +238,34 @@ export const App: React.FC = () => {
 
           const contentType = res.headers.get('content-type') || '';
 
-          // Success JSON response
           if (res.ok && contentType.includes('application/json')) {
             const data = await res.json();
             if (data.results && Array.isArray(data.results)) {
+              setScreeningStep('3/3 Finalizing tiered rankings & executive verdicts...');
+              setScreeningProgress(100);
+              await new Promise((r) => setTimeout(r, 400));
               setResults(data.results);
               setErrorMessage(null);
+
+              // If Tier 1 candidates exist, trigger celebratory confetti!
+              const hasTier1 = data.results.some((r: ScoreResult) => r.tier === 1);
+              if (hasTier1) {
+                confetti({
+                  particleCount: 60,
+                  spread: 70,
+                  origin: { y: 0.6 }
+                });
+              }
+
               return;
             }
           }
 
-          // If reverse proxy returns warmup HTML or 502/503/504, retry
           if (contentType.includes('text/html') || res.status === 502 || res.status === 503 || res.status === 504) {
-            lastErrMessage = 'Screening service is warming up or initializing. Please retry in a few seconds.';
-            continue; // retry loop
+            lastErrMessage = 'Screening service is warming up. Retrying automatically...';
+            continue;
           }
 
-          // Non-OK JSON response
           if (contentType.includes('application/json')) {
             const errData = await res.json();
             throw new Error(errData.error || `Evaluation failed with status ${res.status}`);
@@ -225,31 +274,30 @@ export const App: React.FC = () => {
             throw new Error(`Screening failed: ${textResp.slice(0, 150) || res.statusText}`);
           }
         } catch (fetchErr: any) {
-          // If network error (e.g. Failed to fetch while dev server restarts)
           const msg = fetchErr?.message || String(fetchErr);
           if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('network')) {
-            lastErrMessage = 'Unable to establish connection to the screening service. The backend may be warming up.';
+            lastErrMessage = 'Connecting to screening backend...';
             if (attempt < MAX_RETRIES) {
-              continue; // retry
+              continue;
             }
           } else {
-            // Functional error from backend, rethrow immediately
             throw fetchErr;
           }
         }
       }
 
-      throw new Error(lastErrMessage || 'Unable to connect to the screening engine after multiple attempts. Please click "Screen Resumes with AI" to try again.');
+      throw new Error(lastErrMessage || 'Unable to connect to the screening engine. Please retry.');
     } catch (err: any) {
       console.error('AI Screening failed:', err);
       setErrorMessage(err.message || 'AI Screening request failed.');
     } finally {
       setIsScreening(false);
-      setProgressMsg('');
+      setScreeningStep('');
+      setScreeningProgress(0);
     }
   };
 
-  // Export Excel
+  // Export Excel Report
   const handleExportExcel = async () => {
     if (results.length === 0) return;
     setIsExporting(true);
@@ -269,7 +317,7 @@ export const App: React.FC = () => {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'sunjet_talent_funnel_report.xlsx';
+      a.download = `Sunjet_Talent_Funnel_Report_${new Date().toISOString().slice(0, 10)}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -283,66 +331,113 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-slate-100 text-slate-800">
-      {/* Left Sidebar: Screening Configuration */}
+    <div className="flex h-screen w-screen overflow-hidden bg-slate-100 text-slate-800 antialiased font-sans">
+      {/* Left Sidebar: Screening & Model Calibration */}
       <Sidebar params={params} onChange={setParams} ollamaAvailable={ollamaAvailable} />
 
-      {/* Main Content Area */}
+      {/* Main App Workspace */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
-        {/* Top Navigation Bar */}
-        <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between shrink-0 shadow-2xs">
+        {/* Executive Top Header */}
+        <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between shrink-0 shadow-2xs z-10">
+          {/* Brand & Corporate Logo */}
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-[#1B2A4A] text-white flex items-center justify-center font-bold text-lg shadow-xs">
-              🎯
+            <div className="w-10 h-10 rounded-xl bg-slate-900 text-amber-400 flex items-center justify-center font-bold text-xl shadow-xs border border-slate-800">
+              <Sun className="w-5 h-5 text-amber-400" />
             </div>
             <div>
-              <h1 className="text-base font-bold text-slate-900 tracking-tight flex items-center gap-2">
-                Sunjet Energy — AI Talent Funnel & CV Ranker
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-blue-100 text-[#1B2A4A] px-2 py-0.5 rounded-full border border-blue-200">
-                  <Sparkles className="w-3 h-3 text-amber-500" />
-                  Gemini AI
+              <div className="flex items-center gap-2">
+                <h1 className="text-sm font-bold text-slate-900 tracking-tight">
+                  Sunjet Energy
+                </h1>
+                <span className="text-slate-300">•</span>
+                <span className="text-xs font-semibold text-slate-700">
+                  Talent Funnel &amp; AI Candidate Ranker
                 </span>
-              </h1>
-              <p className="text-xs text-slate-500">
-                AI-Powered semantic candidate screening, qualification analysis & tiered talent funnel
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-amber-50 text-amber-900 px-2 py-0.5 rounded-full border border-amber-200">
+                  <Sparkles className="w-3 h-3 text-amber-500" />
+                  Gemini 3.1 Flash
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Direct semantic CV-to-JD qualification analysis, skills gap detection, and executive interview tiering
               </p>
             </div>
           </div>
 
+          {/* Quick Actions Header Toolbar */}
           <div className="flex items-center gap-2">
             <button
               onClick={loadSampleData}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-colors cursor-pointer"
+              title="Reload sample Sunjet Energy Solar Engineer JD & candidate resumes"
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              Reset Sample Data
+              <RotateCcw className="w-3.5 h-3.5 text-amber-500" />
+              <span>Reset Sample Data</span>
+            </button>
+
+            <button
+              onClick={clearWorkspace}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-500 hover:text-rose-600 hover:bg-rose-50/50 hover:border-rose-200 transition-colors cursor-pointer"
+              title="Clear all fields and start fresh"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Clear</span>
             </button>
           </div>
         </header>
 
         {/* Scrollable Work Area */}
         <main className="flex-1 overflow-y-auto p-6 space-y-6">
+          {/* Notification Banners */}
           {errorMessage && (
-            <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-start gap-2.5">
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-              <div>
-                <span className="font-semibold">Screening Error: </span>
+            <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl text-xs text-rose-900 flex items-start gap-3 shadow-2xs animate-in fade-in duration-200">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <span className="font-bold">Evaluation Alert: </span>
                 {errorMessage}
               </div>
+              <button
+                onClick={() => setErrorMessage(null)}
+                className="text-rose-400 hover:text-rose-700 font-bold ml-2"
+              >
+                ×
+              </button>
             </div>
           )}
 
-          {/* Section 1: Inputs (Grid of JD and CVs) */}
+          {successNotice && (
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-900 flex items-center justify-between shadow-2xs animate-in fade-in duration-200">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="font-semibold">{successNotice}</span>
+              </div>
+              <button
+                onClick={() => setSuccessNotice(null)}
+                className="text-emerald-500 hover:text-emerald-800 font-bold ml-2"
+              >
+                ×
+              </button>
+            </div>
+          )}
+
+          {/* SECTION 1: DUAL INPUT STUDIO (JD & Candidate CVs) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* 1A: Job Description Card */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col space-y-3">
+            {/* 1A: Job Description Studio */}
+            <div className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs flex flex-col space-y-3.5">
+              {/* Card Header & Presets */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-[#1B2A4A]" />
-                  <h3 className="font-bold text-sm text-slate-900">Job Description (JD)</h3>
+                  <div className="p-1.5 bg-slate-100 text-slate-800 rounded-lg">
+                    <Briefcase className="w-4 h-4 text-slate-700" />
+                  </div>
+                  <h3 className="font-bold text-xs uppercase tracking-wider text-slate-900">
+                    Job Description (JD)
+                  </h3>
                 </div>
-                <label className="text-xs text-[#1B2A4A] hover:underline font-semibold cursor-pointer">
-                  Upload file (PDF, DOCX, TXT)
+
+                <label className="text-xs text-slate-700 hover:text-slate-900 font-semibold cursor-pointer flex items-center gap-1">
+                  <UploadCloud className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Attach Document</span>
                   <input
                     type="file"
                     accept=".pdf,.docx,.txt"
@@ -352,51 +447,86 @@ export const App: React.FC = () => {
                 </label>
               </div>
 
+              {/* Job Preset Selector Tabs */}
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {JOB_PRESETS.map((p) => {
+                  const isSelected = selectedPresetId === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => handleSelectPreset(p.id)}
+                      className={`px-2.5 py-1 rounded-xl text-[11px] font-semibold transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-slate-900 text-white shadow-2xs font-bold'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900'
+                      }`}
+                    >
+                      {p.title}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Attached file chip if any */}
               {jdFile && (
-                <div className="px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-900 flex items-center justify-between">
-                  <span className="truncate font-medium">📄 {jdFile.name}</span>
+                <div className="px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 flex items-center justify-between">
+                  <span className="truncate font-semibold flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-blue-600" />
+                    {jdFile.name} ({(jdFile.size / 1024).toFixed(1)} KB)
+                  </span>
                   <button
                     onClick={() => {
                       setJdFile(null);
                       setJdText('');
                     }}
-                    className="text-blue-700 hover:text-blue-900 font-bold ml-2"
+                    className="text-blue-600 hover:text-blue-900 font-bold ml-2 cursor-pointer"
                   >
                     ×
                   </button>
                 </div>
               )}
 
+              {/* Text Area */}
               <textarea
                 value={jdText}
-                onChange={(e) => setJdText(e.target.value)}
-                placeholder="Paste Job Description text here or upload a file above..."
-                className="w-full flex-1 min-h-[160px] p-3 text-xs text-slate-800 bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:border-[#1B2A4A] focus:bg-white resize-none font-mono"
+                onChange={(e) => {
+                  setJdText(e.target.value);
+                  setSelectedPresetId('');
+                }}
+                placeholder="Paste Job Description specifications, key responsibilities, required years of experience, and toolchain expectations..."
+                className="w-full flex-1 min-h-[175px] p-3.5 text-xs text-slate-800 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-hidden focus:border-slate-900 focus:bg-white resize-none font-mono leading-relaxed transition-colors"
               />
-              <div className="flex justify-between items-center text-[11px] text-slate-400">
-                <span>Supports PDF, DOCX, TXT</span>
-                <span>{jdText.length} characters</span>
+
+              {/* Footer specs */}
+              <div className="flex justify-between items-center text-[11px] text-slate-400 font-medium pt-0.5">
+                <span>PDF, DOCX, TXT supported</span>
+                <span className="font-mono">{jdText.length} characters</span>
               </div>
             </div>
 
-            {/* 1B: Candidate CVs Card */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs flex flex-col space-y-3">
+            {/* 1B: Candidate CV Studio */}
+            <div className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs flex flex-col space-y-3.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <UploadCloud className="w-4 h-4 text-[#1B2A4A]" />
-                  <h3 className="font-bold text-sm text-slate-900">Candidate CVs ({cvFiles.length})</h3>
+                  <div className="p-1.5 bg-slate-100 text-slate-800 rounded-lg">
+                    <UploadCloud className="w-4 h-4 text-slate-700" />
+                  </div>
+                  <h3 className="font-bold text-xs uppercase tracking-wider text-slate-900">
+                    Candidate CV Queue ({cvFiles.length})
+                  </h3>
                 </div>
+
                 {cvFiles.length > 0 && (
                   <button
                     onClick={clearAllCvs}
-                    className="text-xs text-rose-600 hover:text-rose-800 font-semibold"
+                    className="text-xs text-rose-600 hover:text-rose-800 font-semibold cursor-pointer"
                   >
                     Clear All
                   </button>
                 )}
               </div>
 
-              {/* Upload Drop Zone */}
+              {/* Interactive Upload Drop Zone */}
               <label
                 onDragOver={(e) => {
                   e.preventDefault();
@@ -416,18 +546,18 @@ export const App: React.FC = () => {
                     addCvFiles(e.dataTransfer.files);
                   }
                 }}
-                className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-colors flex flex-col items-center justify-center ${
+                className={`border-2 border-dashed rounded-2xl p-4 text-center cursor-pointer transition-all flex flex-col items-center justify-center min-h-[90px] ${
                   isDraggingCv
-                    ? 'border-[#1B2A4A] bg-blue-50/60 ring-2 ring-blue-300'
-                    : 'border-slate-200 hover:border-[#1B2A4A] bg-slate-50/60 hover:bg-blue-50/30'
+                    ? 'border-slate-900 bg-amber-50/60 ring-2 ring-amber-300'
+                    : 'border-slate-200 hover:border-slate-400 bg-slate-50/70 hover:bg-slate-100/60'
                 }`}
               >
-                <UploadCloud className="w-6 h-6 text-[#1B2A4A] mb-1" />
-                <span className="text-xs font-semibold text-slate-700">
-                  {isDraggingCv ? 'Drop candidate CVs here' : 'Click or Drag & Drop multiple CVs'}
+                <UploadCloud className="w-5 h-5 text-slate-700 mb-1" />
+                <span className="text-xs font-bold text-slate-800">
+                  {isDraggingCv ? 'Drop candidate CV files here' : 'Click or Drag & Drop Multiple Resumes'}
                 </span>
                 <span className="text-[11px] text-slate-400 mt-0.5">
-                  PDF, DOCX, TXT — batch upload up to 50 files
+                  Batch upload PDF, DOCX, TXT (up to 50 candidates at once)
                 </span>
                 <input
                   type="file"
@@ -439,27 +569,30 @@ export const App: React.FC = () => {
               </label>
 
               {/* Uploaded File List */}
-              <div className="flex-1 min-h-[120px] max-h-[150px] overflow-y-auto divide-y divide-slate-100 border border-slate-100 rounded-xl bg-slate-50/40">
+              <div className="flex-1 min-h-[120px] max-h-[145px] overflow-y-auto divide-y divide-slate-100 border border-slate-100 rounded-2xl bg-slate-50/50">
                 {cvFiles.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-slate-400">
-                    No CVs added yet. Click above or click "Reset Sample Data".
+                  <div className="p-5 text-center text-xs text-slate-400">
+                    No candidate CVs loaded. Drop files above or click "Reset Sample Data".
                   </div>
                 ) : (
                   cvFiles.map((item) => (
                     <div
                       key={item.id}
-                      className="px-3 py-2 flex items-center justify-between text-xs hover:bg-white transition-colors"
+                      className="px-3.5 py-2 flex items-center justify-between text-xs hover:bg-white transition-colors"
                     >
-                      <div className="flex items-center gap-2 truncate">
-                        <FileCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                        <span className="font-medium text-slate-800 truncate max-w-[220px]">
+                      <div className="flex items-center gap-2.5 truncate">
+                        <FileCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="font-semibold text-slate-800 truncate max-w-[220px]">
                           {item.name}
                         </span>
-                        <span className="text-[10px] text-slate-400 shrink-0">({item.sizeStr})</span>
+                        <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                          ({item.sizeStr})
+                        </span>
                       </div>
                       <button
                         onClick={() => removeCv(item.id)}
-                        className="text-slate-400 hover:text-rose-600 p-1 rounded transition-colors"
+                        className="text-slate-400 hover:text-rose-600 p-1 rounded-lg transition-colors cursor-pointer"
+                        title="Remove resume"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -470,37 +603,73 @@ export const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Screening Action Banner */}
-          <div className="bg-gradient-to-r from-[#1B2A4A] to-[#2E4A6E] rounded-2xl p-4 text-white flex flex-wrap items-center justify-between gap-4 shadow-md">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center">
-                <Zap className="w-5 h-5 text-amber-300" />
+          {/* SECTION 2: AI SCREENING LAUNCHPAD DECK */}
+          <div className="bg-slate-900 rounded-3xl p-5 text-white flex flex-wrap items-center justify-between gap-4 shadow-md border border-slate-800">
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center font-bold shadow-xs">
+                <Zap className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-bold text-sm">Ready to Screen Candidates with AI</h3>
-                <p className="text-xs text-slate-200">
-                  Deep semantic AI evaluation compares each candidate against required domain competencies, toolchains & leadership deliverables.
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-sm text-white">
+                    AI Talent Funnel Evaluation Engine
+                  </h3>
+                  <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-800 rounded-full text-slate-300 border border-slate-700">
+                    Tier 1: ≥{Math.round(params.tier1_min * 100)}% | Tier 2: ≥{Math.round(params.tier2_min * 100)}%
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  Evaluates candidate documents directly against required solar engineering qualifications, scale, and tools.
                 </p>
               </div>
             </div>
 
-            <button
-              onClick={handleRunScreening}
-              disabled={isScreening || (!jdText.trim() && !jdFile) || cvFiles.length === 0}
-              className="inline-flex items-center gap-2 px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white rounded-xl font-bold text-xs tracking-wide shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
-            >
-              <Sparkles className="w-4 h-4 text-amber-300" />
-              {isScreening ? progressMsg || 'AI Screening in progress...' : '⚡ Screen Resumes with AI'}
-            </button>
+            <div className="flex items-center gap-3">
+              {isScreening && (
+                <div className="text-right mr-2">
+                  <div className="text-xs font-bold text-amber-400 flex items-center gap-1.5 justify-end">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                    <span>{screeningStep}</span>
+                  </div>
+                  <div className="w-44 bg-slate-800 rounded-full h-1.5 mt-1 overflow-hidden">
+                    <div
+                      style={{ width: `${screeningProgress}%` }}
+                      className="bg-amber-400 h-full transition-all duration-300"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <button
+                onClick={handleRunScreening}
+                disabled={isScreening || (!jdText.trim() && !jdFile) || cvFiles.length === 0}
+                className="inline-flex items-center gap-2 px-6 py-3 bg-amber-400 hover:bg-amber-300 active:bg-amber-500 text-slate-950 rounded-2xl font-bold text-xs tracking-wide shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer shrink-0"
+              >
+                <Sparkles className="w-4 h-4 text-slate-950" />
+                <span>
+                  {isScreening
+                    ? 'AI Screening in Progress...'
+                    : `⚡ Screen ${cvFiles.length} Candidate(s) with AI`}
+                </span>
+              </button>
+            </div>
           </div>
 
-          {/* Section 2: Results Area */}
-          <div className="space-y-3">
+          {/* SECTION 3: RESULTS DASHBOARD & TALENT FUNNEL */}
+          <div className="space-y-4 pt-2">
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold text-slate-900">Screening Matrix & Results</h2>
+              <div>
+                <h2 className="text-base font-bold text-slate-900 tracking-tight">
+                  Screening Matrix &amp; Talent Funnel
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Review candidate scores, drill down into evidence citations, and export reports
+                </p>
+              </div>
+
               {results.length > 0 && (
-                <span className="text-xs text-slate-500">
-                  {results.length} candidate(s) evaluated
+                <span className="text-xs font-mono font-semibold bg-white border border-slate-200 px-3 py-1 rounded-xl text-slate-700 shadow-2xs">
+                  {results.length} candidate(s) screened
                 </span>
               )}
             </div>
@@ -515,7 +684,7 @@ export const App: React.FC = () => {
         </main>
       </div>
 
-      {/* Candidate Drilldown Modal */}
+      {/* Candidate Drilldown Executive Dossier Modal */}
       <CandidateDetailModal
         candidate={selectedCandidate}
         onClose={() => setSelectedCandidate(null)}
@@ -523,4 +692,5 @@ export const App: React.FC = () => {
     </div>
   );
 };
+
 export default App;

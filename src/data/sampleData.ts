@@ -26,6 +26,65 @@ Required Qualifications & Skills:
 • Knowledge of NEC, IEC standards, CEA regulations, and national electrical safety codes.
 • Strong communication, project management, and cross-functional team leadership skills.`;
 
+export const JOB_PRESETS = [
+  {
+    id: 'solar_bess_engineer',
+    title: 'Senior Solar PV & BESS Engineer',
+    department: 'Engineering & Technology',
+    level: 'Senior (5+ Yrs)',
+    tags: ['PVsyst', 'AutoCAD', 'BESS', 'Substations', 'NEC/IEC'],
+    text: SAMPLE_JD
+  },
+  {
+    id: 'solar_epc_manager',
+    title: 'Solar EPC Construction Manager (MW Scale)',
+    department: 'Project Execution',
+    level: 'Lead / Management (7+ Yrs)',
+    tags: ['EPC Management', 'Ground Mount Solar', 'Civil & Electrical QA', 'Safety OSHA', 'SCADA Commissioning'],
+    text: `Sunjet Energy — Solar EPC Construction & Site Commissioning Manager (100MW+ Utility Scale)
+
+About the Role:
+Sunjet Energy is seeking a seasoned EPC Site Construction & Commissioning Manager to direct utility-scale solar park construction from ground-breaking through grid synchronization and COD.
+
+Key Responsibilities:
+• Lead on-site construction of 50MW - 250MW ground-mounted solar PV projects.
+• Supervise civil grading, pile driving, tracker/fixed-tilt mounting structure installation, module mounting, and MV electrical cabling.
+• Oversee installation of 33kV/132kV pooling substations, power transformers, and transmission line tie-ins.
+• Enforce strict workplace safety, EHS regulations, and quality assurance (QA/QC) inspection plans.
+• Manage subcontractor schedules, daily progress tracking, contractor billings, and commissioning punch-lists.
+• Coordinate pre-commissioning testing: cold commissioning, insulation resistance, string VOC/ISC verification, and SCADA telemetry.
+
+Required Qualifications:
+• 7+ years of solar EPC construction experience with at least two completed 50MW+ utility solar plants.
+• Degree in Civil, Electrical, or Mechanical Engineering.
+• Deep understanding of tracker mechanics, DC trenching, inverter duty transformers, and grid interconnection.
+• Certified in OSHA 30 or industrial EHS standards.`
+  },
+  {
+    id: 'solar_ci_sales',
+    title: 'C&I Rooftop Solar Solutions Architect',
+    department: 'Commercial & Sales',
+    level: 'Mid-Senior (4+ Yrs)',
+    tags: ['Helioscope', 'Solar PPA / CAPEX', 'Commercial Rooftop', 'Financial Modeling', 'Client Pitches'],
+    text: `Sunjet Energy — Commercial & Industrial (C&I) Rooftop Solar Solutions Architect
+
+About the Role:
+Sunjet Energy is seeking a high-performing C&I Rooftop Solar Technical Sales Lead to architect turnkey solar solutions for enterprise, manufacturing, and commercial real estate clients.
+
+Key Responsibilities:
+• Conduct client site walk-throughs, shadow analysis, and roof load evaluations for commercial manufacturing plants.
+• Design preliminary solar layouts and generate yield estimates using Helioscope and PVsyst.
+• Formulate techno-commercial proposals: CAPEX vs OPEX/PPA financial models, ROI calculations, and payback timelines.
+• Present technical solutions directly to CXOs, Facility Directors, and Energy Heads.
+• Partner with EPC engineering to transition won accounts into detailed design and delivery.
+
+Required Qualifications:
+• 4+ years of B2B technical sales experience in commercial rooftop solar or distributed energy.
+• Proficiency in Helioscope, energy tariff modeling, and financial cash-flow analysis (IRR, NPV, LCOE).
+• Excellent client-facing communication and consultative closing skills.`
+  }
+];
+
 export const SAMPLE_CVS = [
   {
     name: 'Priya_Sharma_Senior_Solar_Engineer.txt',
