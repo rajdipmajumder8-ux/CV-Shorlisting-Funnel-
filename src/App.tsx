@@ -40,6 +40,7 @@ export const App: React.FC = () => {
 
   // Results & UI state
   const [isScreening, setIsScreening] = useState(false);
+  const [isDraggingCv, setIsDraggingCv] = useState(false);
   const [progressMsg, setProgressMsg] = useState('');
   const [results, setResults] = useState<ScoreResult[]>([]);
   const [selectedCandidate, setSelectedCandidate] = useState<ScoreResult | null>(null);
@@ -99,8 +100,7 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleCvFilesUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+  const addCvFiles = (files: FileList | File[]) => {
     if (!files || files.length === 0) return;
 
     const newItems: Array<{ id: string; name: string; file?: File; content?: string; sizeStr: string }> = [];
@@ -126,6 +126,12 @@ export const App: React.FC = () => {
     });
 
     setCvFiles((prev) => [...prev, ...newItems]);
+  };
+
+  const handleCvFilesUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      addCvFiles(e.target.files);
+    }
     e.target.value = ''; // Reset input
   };
 
@@ -176,28 +182,64 @@ export const App: React.FC = () => {
         formData.append('cv_list', JSON.stringify(inlineCvList));
       }
 
-      const res = await fetch('/api/screen', {
-        method: 'POST',
-        body: formData
-      });
+      // Robust fetch loop with multi-attempt failover and warmup handling
+      let lastErrMessage = '';
+      const MAX_RETRIES = 3;
 
-      const contentType = res.headers.get('content-type') || '';
-      if (res.ok && contentType.includes('application/json')) {
-        const data = await res.json();
-        if (data.results && Array.isArray(data.results)) {
-          setResults(data.results);
-          return;
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          if (attempt > 1) {
+            setProgressMsg(`Connecting to screening engine (attempt ${attempt} of ${MAX_RETRIES})...`);
+            await new Promise((r) => setTimeout(r, attempt * 1500));
+          }
+
+          const res = await fetch('/api/screen', {
+            method: 'POST',
+            body: formData
+          });
+
+          const contentType = res.headers.get('content-type') || '';
+
+          // Success JSON response
+          if (res.ok && contentType.includes('application/json')) {
+            const data = await res.json();
+            if (data.results && Array.isArray(data.results)) {
+              setResults(data.results);
+              setErrorMessage(null);
+              return;
+            }
+          }
+
+          // If reverse proxy returns warmup HTML or 502/503/504, retry
+          if (contentType.includes('text/html') || res.status === 502 || res.status === 503 || res.status === 504) {
+            lastErrMessage = 'Screening service is warming up or initializing. Please retry in a few seconds.';
+            continue; // retry loop
+          }
+
+          // Non-OK JSON response
+          if (contentType.includes('application/json')) {
+            const errData = await res.json();
+            throw new Error(errData.error || `Evaluation failed with status ${res.status}`);
+          } else {
+            const textResp = await res.text();
+            throw new Error(`Screening failed: ${textResp.slice(0, 150) || res.statusText}`);
+          }
+        } catch (fetchErr: any) {
+          // If network error (e.g. Failed to fetch while dev server restarts)
+          const msg = fetchErr?.message || String(fetchErr);
+          if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('network')) {
+            lastErrMessage = 'Unable to establish connection to the screening service. The backend may be warming up.';
+            if (attempt < MAX_RETRIES) {
+              continue; // retry
+            }
+          } else {
+            // Functional error from backend, rethrow immediately
+            throw fetchErr;
+          }
         }
       }
 
-      // Handle non-OK JSON response
-      if (contentType.includes('application/json')) {
-        const errData = await res.json();
-        throw new Error(errData.error || `AI evaluation failed with status ${res.status}`);
-      } else {
-        const textResp = await res.text();
-        throw new Error(`AI Screening failed: ${textResp.slice(0, 150) || res.statusText}`);
-      }
+      throw new Error(lastErrMessage || 'Unable to connect to the screening engine after multiple attempts. Please click "Screen Resumes with AI" to try again.');
     } catch (err: any) {
       console.error('AI Screening failed:', err);
       setErrorMessage(err.message || 'AI Screening request failed.');
@@ -355,10 +397,34 @@ export const App: React.FC = () => {
               </div>
 
               {/* Upload Drop Zone */}
-              <label className="border-2 border-dashed border-slate-200 hover:border-[#1B2A4A] rounded-xl p-4 text-center cursor-pointer transition-colors bg-slate-50/60 hover:bg-blue-50/30 flex flex-col items-center justify-center">
+              <label
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDraggingCv(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDraggingCv(false);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsDraggingCv(false);
+                  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    addCvFiles(e.dataTransfer.files);
+                  }
+                }}
+                className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-colors flex flex-col items-center justify-center ${
+                  isDraggingCv
+                    ? 'border-[#1B2A4A] bg-blue-50/60 ring-2 ring-blue-300'
+                    : 'border-slate-200 hover:border-[#1B2A4A] bg-slate-50/60 hover:bg-blue-50/30'
+                }`}
+              >
                 <UploadCloud className="w-6 h-6 text-[#1B2A4A] mb-1" />
                 <span className="text-xs font-semibold text-slate-700">
-                  Click or Drag & Drop multiple CVs
+                  {isDraggingCv ? 'Drop candidate CVs here' : 'Click or Drag & Drop multiple CVs'}
                 </span>
                 <span className="text-[11px] text-slate-400 mt-0.5">
                   PDF, DOCX, TXT — batch upload up to 50 files

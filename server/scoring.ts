@@ -21,7 +21,7 @@ export interface CandidateInput {
   content: string;
 }
 
-const getGenAI = () => {
+export const getGenAI = () => {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
   return new GoogleGenAI({
@@ -34,8 +34,30 @@ const getGenAI = () => {
   });
 };
 
+// Dynamic model routing with cooldown for models experiencing high-demand spikes
+const BASE_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
+const lastHighDemandTime: Record<string, number> = {};
+const HIGH_DEMAND_COOLDOWN_MS = 60 * 1000; // 60s cooldown before prioritizing back to primary
+
+function isHighDemandOrQuotaError(err: any): boolean {
+  if (!err) return false;
+  const msg = (err.message || String(err)).toLowerCase();
+  const status = String(err.status || err.error?.status || err.code || err.error?.code || '');
+  return (
+    status === '503' ||
+    status === 'UNAVAILABLE' ||
+    status === '429' ||
+    status === 'RESOURCE_EXHAUSTED' ||
+    msg.includes('503') ||
+    msg.includes('high demand') ||
+    msg.includes('unavailable') ||
+    msg.includes('quota') ||
+    msg.includes('resource_exhausted')
+  );
+}
+
 /**
- * Robust Gemini caller with exponential backoff and model fallbacks
+ * Robust Gemini caller with immediate failover on high-demand spikes and model fallbacks
  */
 async function callGeminiWithRetry(prompt: string, schema: any, temperature: number = 0.5): Promise<any> {
   const ai = getGenAI();
@@ -43,11 +65,22 @@ async function callGeminiWithRetry(prompt: string, schema: any, temperature: num
     throw new Error('GEMINI_API_KEY is missing from environment.');
   }
 
-  const models = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+  // Order models, putting any currently cooling down models at the end
+  const now = Date.now();
+  const models = [...BASE_MODELS].sort((a, b) => {
+    const aBusy = lastHighDemandTime[a] && now - lastHighDemandTime[a] < HIGH_DEMAND_COOLDOWN_MS ? 1 : 0;
+    const bBusy = lastHighDemandTime[b] && now - lastHighDemandTime[b] < HIGH_DEMAND_COOLDOWN_MS ? 1 : 0;
+    return aBusy - bBusy;
+  });
+
   let lastError: any = null;
 
   for (const model of models) {
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    // If model is cooling down, only do 1 attempt; otherwise up to 2 attempts
+    const isCoolingDown = lastHighDemandTime[model] && now - lastHighDemandTime[model] < HIGH_DEMAND_COOLDOWN_MS;
+    const maxAttempts = isCoolingDown ? 1 : 2;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         const res = await ai.models.generateContent({
           model,
@@ -61,13 +94,27 @@ async function callGeminiWithRetry(prompt: string, schema: any, temperature: num
 
         if (res.text) {
           const parsed = JSON.parse(res.text);
+          // Successfully completed with this model; clear any cooldown
+          delete lastHighDemandTime[model];
           return { data: parsed, model };
         }
       } catch (err: any) {
         lastError = err;
+
+        // If the model is experiencing temporary 503 high demand or quota exhaustion,
+        // fail over IMMEDIATELY to the next fallback model rather than repeatedly retrying the overloaded model.
+        if (isHighDemandOrQuotaError(err)) {
+          lastHighDemandTime[model] = Date.now();
+          console.info(
+            `[Gemini AI] ${model} reported high demand / unavailable (503). Immediately failing over to next available model...`
+          );
+          break; // Break inner loop immediately to try the next model
+        }
+
         console.warn(`[Gemini AI] Attempt ${attempt} with ${model} error:`, err?.message || err);
-        // Wait briefly before retrying (exponential backoff)
-        await new Promise((r) => setTimeout(r, attempt * 1200));
+        if (attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, attempt * 800));
+        }
       }
     }
   }
