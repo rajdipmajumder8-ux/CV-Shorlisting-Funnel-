@@ -1,0 +1,6 @@
+{
+  "name": "Sunjet Energy Talent Funnel & CV Ranker",
+  "description": "AI-powered resume screening and talent evaluation tool that compares CVs directly against job descriptions using Gemini AI, tiering candidates with in-depth strengths, gaps, and Excel export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
